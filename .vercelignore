@@ -1,0 +1,14 @@
+# Ignore frontend directories
+backend/
+src/
+dist/
+
+# Ignore dev files
+node_modules/
+.git/
+.github/
+
+# Ignore docs and misc
+*.md
+!README.md
+*.zip

@@ -1,15 +1,17 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "api/**/*.js",
-      "use": "@vercel/node"
+  "outputDirectory": ".vercel/output",
+  "functions": {
+    "api/index.js": {
+      "runtime": "@vercel/node@3",
+      "memory": 1024,
+      "maxDuration": 10
     }
-  ],
+  },
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "/api/$1"
+      "dest": "/api/index.js"
     }
   ]
 }

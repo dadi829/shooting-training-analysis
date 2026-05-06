@@ -1,0 +1,13 @@
+# 忽略会导致 Vercel 检测多服务的文件夹
+node_modules
+.git
+.github
+dist
+build
+.vscode
+.idea
+*.md
+!README.md
+src
+backend
+*.log

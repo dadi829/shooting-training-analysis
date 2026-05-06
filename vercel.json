@@ -1,17 +1,6 @@
 {
   "version": 2,
-  "outputDirectory": ".vercel/output",
-  "functions": {
-    "api/index.js": {
-      "runtime": "@vercel/node@3",
-      "memory": 1024,
-      "maxDuration": 10
-    }
-  },
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/api/index.js"
-    }
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index.js" }
   ]
 }

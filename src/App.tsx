@@ -1,13 +1,12 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { 
   Layout, Menu, Card, List, Image, Button, Pagination, Modal, message, Typography, 
-  Spin, Empty, Tag, Row, Col, Upload, Descriptions, Progress, Collapse, Form, 
+  Spin, Empty, Tag, Row, Col, Upload, Collapse, Form, 
   Input, Select, Tabs, Space, DatePicker, InputNumber, Statistic
 } from 'antd';
 import { 
   DeleteOutlined, PictureOutlined, HistoryOutlined, ReloadOutlined, RobotOutlined, 
-  UploadOutlined, CheckCircleFilled, ThunderboltOutlined, BulbOutlined, 
-  WarningOutlined, CheckOutlined, FireOutlined, UserOutlined, LogoutOutlined,
+  UploadOutlined, CheckCircleFilled, UserOutlined, LogoutOutlined,
   BarChartOutlined, TeamOutlined, SearchOutlined, DownloadOutlined, FilterOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -15,11 +14,11 @@ import ReactECharts from 'echarts-for-react';
 import './App.css';
 
 const { Header, Content, Sider } = Layout;
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 const { Panel } = Collapse;
 const { Option } = Select;
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3002';
+const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || 'http://localhost:3002';
 
 // 系统状态类型
 interface SystemStatus {
@@ -263,7 +262,7 @@ const AuthPage: React.FC = () => {
 
 // 主应用布局
 const MainApp: React.FC = () => {
-  const { user, token, logout } = useAuth();
+  const { user, logout } = useAuth();
   const [activeKey, setActiveKey] = useState('upload');
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
 

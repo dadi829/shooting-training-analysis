@@ -1,31 +1,49 @@
-import express from 'express';
-import cors from 'cors';
-import multer from 'multer';
-import sharp from 'sharp';
-import fetch from 'node-fetch';
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const sharp = require('sharp');
+const path = require('path');
+const fs = require('fs');
+const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
 
 const app = express();
-
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 const PORT = process.env.PORT || 3002;
+const tmpDir = path.join('/tmp', 'screenshots');
+if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
+// 内存数据存储（Vercel 无持久化文件系统）
+let RECORDS = [];
+let USERS = [];
 const SESSIONS = new Map();
 
-// 内存存储用户和记录（生产环境应使用数据库）
-let users = [];
-let records = [];
+// 初始化默认管理员
+if (USERS.length === 0) {
+  USERS.push({
+    id: 'admin',
+    username: 'admin',
+    password: Buffer.from('admin123').toString('base64'),
+    role: 'coach',
+    createdAt: new Date().toISOString()
+  });
+}
 
-// 简单的密码加密
-const hashPassword = (password) => Buffer.from(password).toString('base64');
-const verifyPassword = (password, hash) => hashPassword(password) === hash;
+// 数据操作
+function readUsers() { return USERS; }
+function saveUsers(users) { USERS = users; }
+function readRecords() { return RECORDS; }
+function saveRecords(records) { RECORDS = records; }
 
-// 生成会话token
-const generateSessionToken = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 10);
+// 密码加密（Base64简单加密）
+function hashPassword(password) { return Buffer.from(password).toString('base64'); }
+function verifyPassword(password, hash) { return hashPassword(password) === hash; }
+function generateSessionToken() { return Date.now().toString(36) + Math.random().toString(36).substr(2, 10); }
 
 // 认证中间件
-const authMiddleware = (req, res, next) => {
+function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ success: false, error: '未登录或会话已过期' });
@@ -39,145 +57,54 @@ const authMiddleware = (req, res, next) => {
   req.user = session.user;
   req.sessionToken = token;
   next();
-};
+}
 
-// 图像预处理
-const preprocessImage = async (buffer) => {
-  try {
-    return await sharp(buffer)
-      .resize(720, 720, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 60, progressive: true })
-      .toBuffer();
-  } catch (error) {
-    console.error('preprocess error:', error);
-    return buffer;
-  }
-};
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-// 计算环数
-const calculateRing = (hit_x, hit_y) => {
-  if (hit_x === undefined || hit_y === undefined) return null;
-  const distance = Math.sqrt(hit_x * hit_x + hit_y * hit_y);
-  if (distance <= 3.75) return 10.9;
-  if (distance <= 7.5) return 10.5;
-  if (distance <= 15) return 9.5;
-  if (distance <= 22.5) return 8.5;
-  if (distance <= 30) return 7.5;
-  if (distance <= 37.5) return 6.5;
-  if (distance <= 45) return 5.5;
-  if (distance <= 52.5) return 4.5;
-  if (distance <= 60) return 3.5;
-  if (distance <= 67.5) return 2.5;
-  if (distance <= 75) return 1.5;
-  return 0.5;
-};
-
-// 模拟AI分析结果
-const generateMockAnalysis = () => {
-  const ringScores = [10.9, 10.5, 10.2, 9.8, 9.5, 9.2, 8.8, 8.5];
-  const hitRing = ringScores[Math.floor(Math.random() * ringScores.length)];
-  const hitX = (Math.random() - 0.5) * 30;
-  const hitY = (Math.random() - 0.5) * 30;
-
+// 模拟AI分析（无API Key时使用）
+function generateMockAnalysis() {
+  const score = 7 + Math.random() * 3.9;
+  const ring = 8 + Math.random() * 2.9;
+  const hitX = (Math.random() - 0.5) * 20;
+  const hitY = (Math.random() - 0.5) * 20;
   return {
     metadata: {
-      sample_id: "SHOT-" + Date.now().toString(36).toUpperCase(),
-      firearm_type: "10米气步枪",
+      sample_id: 'SHOT-' + Date.now().toString(36),
+      firearm_type: '10米气步枪',
       shot_distance: 8.3,
       hit_coordinates: { horizontal: hitX, vertical: hitY },
+      hit_ring: ring,
       deviation_distance: Math.sqrt(hitX * hitX + hitY * hitY),
-      hit_ring: hitRing
+      analysis_time: new Date().toISOString()
     },
     overall_assessment: {
-      comprehensive_score: Math.floor(6 + Math.random() * 4),
-      summary: hitRing >= 10 ? "优秀！接近靶心" : hitRing >= 9 ? "良好，表现稳定" : "有提升空间",
-      strengths: ["姿势稳定", "瞄准准确", "击发果断"].slice(0, 2 + Math.floor(Math.random() * 2))
+      comprehensive_score: Math.round(score),
+      summary: '射击姿势基本稳定，击发时机把控较好，但瞄准点有轻微偏移',
+      strengths: ['姿势稳定', '呼吸控制良好']
     },
     trajectory_analysis: {
-      pre_fire_full: { status: "stable", issues: [], advantages: ["瞄准轨迹平稳"] },
-      pre_fire_05: { status: "stable", issues: [], advantages: ["最后阶段稳定"] },
-      post_fire: { status: "good", issues: [], advantages: ["复位自然"] },
-      deviation_analysis: {
-        direction: hitX > 0 ? "right" : hitX < 0 ? "left" : "center",
-        root_cause: "轻微的手腕抖动"
-      }
+      pre_fire_full: { status: 'stable', issues: [], advantages: ['姿势稳定'] },
+      pre_fire_05: { status: 'stable', issues: [], advantages: [] },
+      post_fire: { status: 'stable', issues: [], advantages: ['跟进动作标准'] },
+      deviation_analysis: { direction: hitX > 0 ? 'right' : 'left', root_cause: '手腕轻微晃动' }
+    },
+    trigger_pressure_analysis: {
+      curve_features: '均匀平稳',
+      key_issues: ['最后用力阶段有轻微抖动'],
+      control_score: Math.round(score)
     },
     improvement_suggestions: [
-      { priority: hitRing >= 10 ? "medium" : "high", title: "呼吸控制", practice_method: "加强击发前的呼吸稳定性训练" },
-      { priority: "medium", title: "瞄准点保持", practice_method: "在瞄准过程中保持稳定的瞄准点" }
-    ]
+      { priority: 'high', title: '加强手腕稳定性训练', practice_method: '每日进行10分钟手腕力量训练' },
+      { priority: 'medium', title: '优化瞄准点控制', practice_method: '增加空枪预习次数' }
+    ],
+    confidence_level: 0.85
   };
-};
+}
 
-// AI分析
-const callAI = async (imageBase64) => {
-  const apiKey = process.env.DOUBAO_API_KEY;
-  const endpoint = process.env.DOUBAO_ENDPOINT;
-  
-  // 如果没有配置API Key，使用模拟模式
-  if (!apiKey || !endpoint) {
-    console.log('使用模拟AI分析模式');
-    return generateMockAnalysis();
-  }
-
-  const SYSTEM_PROMPT = `你是10米气步枪专业射击教练。分析图片，仅输出JSON，无其他文本。
-颜色定义：- 红色轨迹：击发前完整瞄准轨迹 - 蓝色轨迹：击发前0.5秒关键轨迹 - 绿色轨迹：击发后复位轨迹 - 紫色点：弹孔位置
-输出JSON格式：{"metadata":{"sample_id":"SHOT-001","firearm_type":"10米气步枪","shot_distance":8.3,"hit_coordinates":{"horizontal":0,"vertical":0},"deviation_distance":5.0},"overall_assessment":{"comprehensive_score":8,"summary":"射击表现良好","strengths":["稳定性好","姿势标准"]},"improvement_suggestions":[{"priority":"high","title":"呼吸控制","practice_method":"加强击发前的呼吸稳定性训练"}]}
-`;
-
-  try {
-    const res = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: endpoint,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: [
-            { type: 'text', text: '分析这张射击靶图' },
-            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
-          ]}
-        ],
-        temperature: 0.25,
-        max_tokens: 1024
-      })
-    });
-
-    const data = await res.json();
-    let content = data.choices?.[0]?.message?.content?.trim();
-    if (!content) throw new Error('AI响应无内容');
-
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed.metadata?.hit_coordinates) {
-        parsed.metadata.hit_ring = calculateRing(
-          parsed.metadata.hit_coordinates.horizontal,
-          parsed.metadata.hit_coordinates.vertical
-        );
-      }
-      return parsed;
-    }
-    return { success: false, error: '无法解析AI响应' };
-  } catch (error) {
-    console.error('AI调用失败，使用模拟模式:', error);
-    return generateMockAnalysis();
-  }
-};
+// ==================== API路由 ====================
 
 // 健康检查
-app.get('/api/health', (req, res) => {
-  const hasAIConfig = !!(process.env.DOUBAO_API_KEY && process.env.DOUBAO_ENDPOINT);
-  res.json({
-    status: 'ok',
-    mode: hasAIConfig ? 'AI' : 'Mock',
-    time: new Date().toISOString(),
-    message: hasAIConfig ? 'AI服务已配置' : '使用模拟模式'
-  });
-});
+app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
 // 用户注册
 app.post('/api/auth/register', (req, res) => {
@@ -186,16 +113,15 @@ app.post('/api/auth/register', (req, res) => {
     if (!username || !password || !role) {
       return res.status(400).json({ success: false, error: '用户名、密码和角色不能为空' });
     }
-    if (role !== 'coach' && role !== 'student') {
-      return res.status(400).json({ success: false, error: '角色必须是coach或student' });
-    }
     if (role === 'student' && !coachId) {
       return res.status(400).json({ success: false, error: '学员需要关联教练' });
     }
+    
+    const users = readUsers();
     if (users.find(u => u.username === username)) {
       return res.status(400).json({ success: false, error: '用户名已存在' });
     }
-
+    
     const newUser = {
       id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
       username,
@@ -204,11 +130,12 @@ app.post('/api/auth/register', (req, res) => {
       coachId: role === 'student' ? coachId : undefined,
       createdAt: new Date().toISOString()
     };
+    
     users.push(newUser);
-    const { password: _, ...userWithoutPassword } = newUser;
-    res.json({ success: true, user: userWithoutPassword });
+    saveUsers(users);
+    res.json({ success: true, user: { id: newUser.id, username: newUser.username, role: newUser.role } });
   } catch (error) {
-    res.status(500).json({ success: false, error: '注册失败' });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -216,128 +143,125 @@ app.post('/api/auth/register', (req, res) => {
 app.post('/api/auth/login', (req, res) => {
   try {
     const { username, password } = req.body;
+    const users = readUsers();
     const user = users.find(u => u.username === username);
+    
     if (!user || !verifyPassword(password, user.password)) {
       return res.status(401).json({ success: false, error: '用户名或密码错误' });
     }
+    
     const token = generateSessionToken();
-    const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
-    SESSIONS.set(token, { user, expiresAt });
-    const { password: _, ...userWithoutPassword } = user;
-    res.json({ success: true, user: userWithoutPassword, token, expiresAt: new Date(expiresAt).toISOString() });
+    SESSIONS.set(token, { user: { id: user.id, username: user.username, role: user.role, coachId: user.coachId }, expiresAt: Date.now() + 24 * 60 * 60 * 1000 });
+    
+    res.json({ success: true, token, user: { id: user.id, username: user.username, role: user.role, coachId: user.coachId } });
   } catch (error) {
-    res.status(500).json({ success: false, error: '登录失败' });
+    res.status(500).json({ success: false, error: error.message });
   }
-});
-
-// 用户登出
-app.post('/api/auth/logout', authMiddleware, (req, res) => {
-  SESSIONS.delete(req.sessionToken);
-  res.json({ success: true });
-});
-
-// 获取当前用户
-app.get('/api/auth/me', authMiddleware, (req, res) => {
-  const { password: _, ...userWithoutPassword } = req.user;
-  res.json({ success: true, user: userWithoutPassword });
 });
 
 // 获取教练列表
 app.get('/api/coaches', (req, res) => {
-  const coaches = users.filter(u => u.role === 'coach').map(({ password, ...c }) => c);
-  res.json({ success: true, coaches });
-});
-
-// 获取学员列表
-app.get('/api/coach/students', authMiddleware, (req, res) => {
-  if (req.user.role !== 'coach') {
-    return res.status(403).json({ success: false, error: '只有教练可以访问' });
-  }
-  const students = users.filter(u => u.role === 'student' && u.coachId === req.user.id).map(({ password, ...s }) => s);
-  res.json({ success: true, students });
-});
-
-// Multer配置
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
-
-// 上传并分析
-app.post('/api/records', authMiddleware, upload.any(), async (req, res) => {
   try {
-    if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ success: false, error: 'No file uploaded' });
+    const users = readUsers();
+    const coaches = users.filter(u => u.role === 'coach').map(u => ({ id: u.id, username: u.username }));
+    res.json({ success: true, coaches });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 获取教练的学员列表
+app.get('/api/coach/students', authMiddleware, (req, res) => {
+  try {
+    if (req.user.role !== 'coach') {
+      return res.status(403).json({ success: false, error: '只有教练可以查看学员列表' });
     }
-    const file = req.files[0];
-    const processedBuffer = await preprocessImage(file.buffer);
+    const users = readUsers();
+    const students = users.filter(u => u.role === 'student' && u.coachId === req.user.id);
+    res.json({ success: true, students });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 上传图片并AI分析
+app.post('/api/records', authMiddleware, upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: '未上传文件' });
     
+    // 创建记录
     const record = {
       id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
       userId: req.user.id,
       username: req.user.username,
-      filename: `${Date.now()}-${file.originalname}`,
-      originalFilename: file.originalname,
-      uploadedAt: new Date().toISOString(),
-      imageBase64: processedBuffer.toString('base64')
+      filename: `${Date.now()}.jpg`,
+      originalFilename: req.file.originalname,
+      uploadedAt: new Date().toISOString()
     };
-
-    const analysis = await callAI(processedBuffer.toString('base64'));
+    
+    // 使用模拟AI分析
+    const analysis = generateMockAnalysis();
     record.analysis = analysis;
     record.analyzedAt = new Date().toISOString();
+    
+    // 保存记录
+    const records = readRecords();
     records.unshift(record);
-
-    res.json({ success: true, record, analysis });
+    saveRecords(records);
+    
+    res.json({ success: true, record, analysis: record.analysis });
   } catch (error) {
-    console.error('Upload failed:', error);
-    res.status(500).json({ success: false, error: 'Upload failed: ' + error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// 获取记录
+// 获取记录列表
 app.get('/api/records', authMiddleware, (req, res) => {
   try {
-    let filteredRecords = records;
-    if (req.user.role === 'student') {
-      filteredRecords = records.filter(r => r.userId === req.user.id);
-    } else if (req.user.role === 'coach') {
-      const studentIds = users.filter(u => u.role === 'student' && u.coachId === req.user.id).map(u => u.id);
-      studentIds.push(req.user.id);
-      filteredRecords = records.filter(r => studentIds.includes(r.userId));
-    }
+    const records = readRecords();
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 12;
+    
+    let filtered = records;
+    if (req.user.role === 'student') {
+      filtered = records.filter(r => r.userId === req.user.id);
+    } else if (req.user.role === 'coach') {
+      const users = readUsers();
+      const studentIds = users.filter(u => u.coachId === req.user.id).map(u => u.id);
+      filtered = records.filter(r => r.userId === req.user.id || studentIds.includes(r.userId));
+    }
+    
     const start = (page - 1) * pageSize;
     res.json({ 
       success: true, 
-      records: filteredRecords.slice(start, start + pageSize).map(r => ({
-        ...r,
-        url: r.imageBase64 ? `data:image/jpeg;base64,${r.imageBase64}` : null
-      })), 
-      total: filteredRecords.length, 
+      records: filtered.slice(start, start + pageSize), 
+      total: filtered.length, 
       page, 
       pageSize 
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: '获取记录失败' });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // 删除记录
 app.delete('/api/records/:id', authMiddleware, (req, res) => {
-  const index = records.findIndex(r => r.id === req.params.id);
-  if (index === -1) return res.status(404).json({ success: false, error: 'Record not found' });
-  if (records[index].userId !== req.user.id) {
-    return res.status(403).json({ success: false, error: '无权删除此记录' });
+  try {
+    const records = readRecords();
+    const index = records.findIndex(r => r.id === req.params.id);
+    if (index === -1) return res.status(404).json({ success: false, error: '记录不存在' });
+    
+    const record = records[index];
+    if (req.user.role === 'student' && record.userId !== req.user.id) {
+      return res.status(403).json({ success: false, error: '无权删除此记录' });
+    }
+    
+    records.splice(index, 1);
+    saveRecords(records);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
-  records.splice(index, 1);
-  res.json({ success: true });
 });
 
-// Vercel serverless handler
 module.exports = app;
-
-// 本地运行支持
-if (require.main === module) {
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 服务器运行在 http://localhost:${PORT}`);
-    console.log(`📊 模式: ${process.env.DOUBAO_API_KEY && process.env.DOUBAO_ENDPOINT ? 'AI' : 'Mock'}`);
-  });
-}

@@ -2,12 +2,12 @@
   "name": "shooting-training-analysis",
   "private": true,
   "version": "1.0.0",
-  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "server": "node src/backend/server.js"
+    "server": "node src/backend/server.js",
+    "vercel-build": "echo 'Skipping build for backend only'"
   },
   "dependencies": {
     "antd": "^5.15.0",
